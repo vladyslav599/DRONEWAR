@@ -1,0 +1,1029 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<title>2D Операція: Мапа з будівлями та ворожими дронами</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; }
+  body { background: #090d16; color: #f8fafc; overflow: hidden; display: flex; flex-direction: column; height: 100vh; }
+  
+  #top-bar {
+    height: 60px; background: #1e293b; border-bottom: 2px solid #334155;
+    display: flex; align-items: center; justify-content: space-between; padding: 0 20px; z-index: 10;
+  }
+  .stat-box { display: flex; gap: 18px; align-items: center; font-size: 15px; font-weight: bold; }
+  .money { color: #4ade80; font-size: 19px; }
+  .targets-left { color: #f87171; }
+  
+  .controls-hint { font-size: 12px; color: #cbd5e1; background: #0f172a; padding: 6px 12px; border-radius: 6px; border: 1px solid #334155; }
+  .controls-hint b { color: #38bdf8; }
+  
+  .top-buttons { display: flex; gap: 10px; align-items: center; }
+  button.btn {
+    background: #2563eb; color: white; border: none; padding: 8px 14px; border-radius: 6px;
+    font-weight: bold; cursor: pointer; transition: 0.2s; font-size: 13px;
+  }
+  button.btn:hover { background: #1d4ed8; }
+  button.btn-green { background: #16a34a; }
+  button.btn-green:hover { background: #15803d; }
+  button.btn-orange { background: #d97706; }
+  button.btn-orange:hover { background: #b45309; }
+  button.btn-red { background: #dc2626; }
+  button.btn-red:hover { background: #b91c1c; }
+
+  #game-container { position: relative; flex: 1; width: 100%; overflow: hidden; }
+  canvas#gameCanvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+
+  #toast-msg {
+    position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+    background: rgba(239, 68, 68, 0.9); color: white; padding: 8px 18px;
+    border-radius: 6px; font-weight: bold; font-size: 14px; display: none; z-index: 50;
+  }
+
+  #bottom-bar {
+    height: 98px; background: #1e293b; border-top: 2px solid #334155;
+    display: flex; align-items: center; padding: 8px 20px; gap: 12px; z-index: 10;
+  }
+  #selected-drone-card {
+    display: flex; align-items: center; gap: 12px; background: #0f172a;
+    padding: 6px 14px; border-radius: 8px; border: 1px solid #475569; min-width: 420px;
+  }
+  #preview-canvas { background: #1e293b; border-radius: 6px; border: 1px solid #334155; }
+  .drone-stats { font-size: 12px; color: #cbd5e1; line-height: 1.4; }
+  .drone-name { font-size: 15px; font-weight: bold; color: #38bdf8; }
+
+  #telemetry-box {
+    margin-left: auto; background: #0f172a; border: 1px solid #38bdf8;
+    padding: 8px 14px; border-radius: 8px; font-size: 12px; min-width: 245px;
+  }
+
+  /* Ангар */
+  #hangar-modal {
+    display: none; position: fixed; top: 60px; left: 0; right: 0; bottom: 0;
+    background: rgba(9, 13, 22, 0.97); z-index: 100; padding: 20px; overflow-y: auto;
+  }
+  .hangar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+  .filter-tabs { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
+  .drones-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(255px, 1fr)); gap: 12px; padding-bottom: 40px;
+  }
+  .drone-item {
+    background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px;
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .drone-item.active { border: 2px solid #38bdf8; background: #1e3a8a44; }
+  .drone-item-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .mini-preview { background: #0f172a; border-radius: 6px; border: 1px solid #334155; }
+  .drone-item h4 { margin-bottom: 4px; font-size: 14px; }
+  .type-badge {
+    display: inline-block; font-size: 10px; padding: 2px 6px; border-radius: 4px;
+    background: #334155; color: #e2e8f0; margin-bottom: 6px; width: fit-content;
+  }
+  .drone-item p { font-size: 11.5px; color: #94a3b8; margin-bottom: 8px; line-height: 1.4; }
+  .buy-btn {
+    width: 100%; padding: 7px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;
+  }
+  .buy-btn.bought { background: #15803d; color: white; cursor: default; }
+  .buy-btn.locked { background: #16a34a; color: white; }
+  .buy-btn:disabled { background: #475569; color: #94a3b8; cursor: not-allowed; }
+
+  #victory-screen {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.88);
+    z-index: 200; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+  }
+  #victory-screen h1 { font-size: 46px; color: #4ade80; margin-bottom: 10px; }
+</style>
+</head>
+<body>
+
+<div id="top-bar">
+  <div class="stat-box">
+    <span>💰 Бюджет: <span id="money-display" class="money">5000</span> ₴</span>
+    <span>🎯 Цілей РФ: <span id="targets-display" class="targets-left">16</span></span>
+    <span>✈️ В небі: <span id="active-drones-display">0</span></span>
+  </div>
+  <div class="controls-hint">
+    <b>Мишка (затиснути) / W,S:</b> Політ | <b>D:</b> Форсаж | <b>E:</b> Теплові пастки | <b>TAB:</b> Інший борт | <b>ПРОБІЛ:</b> Піке
+  </div>
+  <div class="top-buttons">
+    <button class="btn btn-red" onclick="respawnTargets()">🔄 Перезавантажити цілі</button>
+    <button class="btn" onclick="toggleHangar()">🚀 Ангар (50 Моделей)</button>
+  </div>
+</div>
+
+<div id="game-container">
+  <div id="toast-msg">Недостатньо коштів!</div>
+  <canvas id="gameCanvas"></canvas>
+</div>
+
+<div id="bottom-bar">
+  <div id="selected-drone-card">
+    <canvas id="preview-canvas" width="76" height="54"></canvas>
+    <div>
+      <div class="drone-name" id="cur-drone-name">1. FPV 'Комар'</div>
+      <div class="drone-stats" id="cur-drone-stats">Швидкість: 4.0 | Урон: 60 | ЛТЦ: 1 | Запуск: Безкоштовно</div>
+    </div>
+  </div>
+  <button class="btn btn-green" onclick="launchDrone()">🚀 ЗАПУСТИТИ</button>
+  <button class="btn btn-orange" onclick="launchSwarm()">🔥 ЗАЛП (x3)</button>
+  <button class="btn" style="background:#7c3aed;" onclick="switchControlledDrone()">🔄 Змінити борт (TAB)</button>
+
+  <div id="telemetry-box">
+    <div style="color:#38bdf8; font-weight:bold;">📡 РУЧНЕ КЕРУВАННЯ:</div>
+    <div id="telemetry-info" style="color:#94a3b8;">Немає активного борту в небі</div>
+  </div>
+</div>
+
+<div id="hangar-modal">
+  <div class="hangar-header">
+    <h2>🚀 Арсенал України: 50 Моделей та Інфраструктурна Мапа</h2>
+    <button class="btn" style="background:#ef4444;" onclick="toggleHangar()">✖ Закрити</button>
+  </div>
+  <div class="filter-tabs">
+    <button class="btn" onclick="renderHangar('all')">Всі (50)</button>
+    <button class="btn" onclick="renderHangar('uav')">Дрони (1-35)</button>
+    <button class="btn" onclick="renderHangar('missile')">Крилаті та Балістичні ракети (36-50)</button>
+    <button class="btn btn-orange" style="margin-left:auto;" onclick="unlockAllForTest()">🔓 Купити всі 50 + Бюджет (Тест)</button>
+  </div>
+  <div class="drones-grid" id="drones-grid"></div>
+</div>
+
+<div id="victory-screen">
+  <h1>ПЕРЕМОГА! Всі цілі знищено!</h1>
+  <p id="victory-earned-text" style="font-size: 20px; margin-bottom: 20px; color: #cbd5e1;">Кошти та арсенал збережено!</p>
+  <button class="btn btn-green" style="font-size: 18px; padding: 12px 24px;" onclick="nextLevelAndKeep()">Наступна хвиля штурму</button>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const previewCanvas = document.getElementById('preview-canvas');
+const previewCtx = previewCanvas.getContext('2d');
+
+let width, height;
+function resize() {
+  width = canvas.width = document.getElementById('game-container').clientWidth;
+  height = canvas.height = document.getElementById('game-container').clientHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+const ARSENAL_NAMES = [
+  "FPV 'Комар'", "FPV 'Шершень 7'", "FPV 'Дартс'", "Мавік-3 Скид", "Vampire (Баба Яга)",
+  "Heavy Shot", "Кажан E620", "R18 Октокоптер", "Punisher", "Switchblade 300",
+  "Switchblade 600", "Warmate", "RAM II", "Лелека-Удар", "Шарк-М Камікадзе",
+  "UJ-22 Airborne", "Бобер (Beaver)", "Морок", "Рубака", "Лютий (AN-196)",
+  "Синиця-X", "Кобра", "Сокіл-300", "Горлиця-2", "Чаклун-Удар",
+  "Довбуш Т10", "Акула-Стелс", "Байрактар TB2", "Байрактар Акіджі", "Валькірія-Штурм",
+  "Скіф-М", "UJ-25 Skyline", "Трембіта", "Пекло", "Паляниця",
+  "Вільха-М", "HIMARS GMLRS", "GLSDB", "AGM-88 HARM", "Р-360 Нептун",
+  "Storm Shadow", "SCALP-EG", "TAURUS KEPD", "ATACMS M39", "ATACMS M57",
+  "Грім-2 (Сапсан)", "Томагавк-UA", "Фламінго (FP-5)", "Циркон-UA", "Кара Божа (МБР)"
+];
+
+const DRONES_DB = ARSENAL_NAMES.map((name, i) => {
+  const isMissile = i >= 35;
+  const isBallistic = i >= 43;
+  const isStealth = (i >= 26 && i <= 31) || i === 40 || i === 41;
+  const cat = isMissile ? "missile" : "uav";
+  
+  return {
+    id: i,
+    name: `${i + 1}. ${name}`,
+    cat,
+    type: isBallistic ? "Балістична ракета" : (isMissile ? "Крилата ракета" : (i < 8 ? "FPV / Квадрокоптер" : "Ударний БПЛА")),
+    isMissile,
+    isBallistic,
+    buyCost: i === 0 ? 0 : Math.round(280 * Math.pow(1.15, i)),
+    speed: +(4.0 + (i * 0.07) + (isMissile ? 2.3 : 0)).toFixed(1),
+    turnRate: isMissile ? 0.11 : 0.14,
+    hp: Math.round(25 + i * 5),
+    damage: Math.round(60 + i * 15),
+    stealth: isStealth ? 0.5 : 1.0,
+    radius: Math.round(28 + i * 0.85),
+    flares: i < 10 ? 1 : (i < 30 ? 2 : (i < 43 ? 4 : 6)),
+    color: isMissile ? "#f43f5e" : (isStealth ? "#c084fc" : (i < 12 ? "#38bdf8" : "#facc15")),
+    bought: i === 0
+  };
+});
+
+function drawUniqueDroneModel(c, id, timeTick = 0) {
+  c.save();
+  c.lineWidth = 1.5;
+
+  if (id === 0 || id === 1) {
+    c.strokeStyle = "#38bdf8"; c.lineWidth = 2.5;
+    c.beginPath(); c.moveTo(-9, -8); c.lineTo(9, 8); c.moveTo(-9, 8); c.lineTo(9, -8); c.stroke();
+    c.fillStyle = "#ef4444"; c.fillRect(-3, -3, 6, 6);
+  } else if (id === 4 || id === 6) {
+    c.strokeStyle = "#f97316"; c.lineWidth = 2.2;
+    for (let a = 0; a < 3; a++) {
+      const ang = (a / 3) * Math.PI * 2;
+      c.beginPath(); c.moveTo(0, 0); c.lineTo(Math.cos(ang) * 12, Math.sin(ang) * 12); c.stroke();
+    }
+    c.fillStyle = "#1e293b"; c.beginPath(); c.arc(0, 0, 5, 0, Math.PI * 2); c.fill();
+  } else if (id === 16 || id === 19) {
+    c.fillStyle = "#cbd5e1"; c.beginPath(); c.ellipse(2, 0, 12, 3.5, 0, 0, Math.PI * 2); c.fill();
+    c.fillStyle = "#f59e0b"; c.fillRect(-2, -12, 3, 24);
+    c.strokeStyle = "#94a3b8"; c.lineWidth = 1.5;
+    c.beginPath(); c.moveTo(-2, -6); c.lineTo(-14, -6); c.moveTo(-2, 6); c.lineTo(-14, 6); c.stroke();
+  } else if (id === 27 || id === 28) {
+    c.fillStyle = "#64748b"; c.beginPath(); c.moveTo(14, 0); c.lineTo(-10, -2); c.lineTo(-10, 2); c.closePath(); c.fill();
+    c.fillStyle = "#38bdf8"; c.beginPath(); c.moveTo(4, 0); c.lineTo(-4, -16); c.lineTo(-7, -16); c.lineTo(-1, 0); c.lineTo(-7, 16); c.lineTo(-4, 16); c.fill();
+  } else if (id === 31 || id === 40 || id === 41) {
+    c.fillStyle = "#0f172a";
+    c.beginPath(); c.moveTo(16, 0); c.lineTo(-8, -12); c.lineTo(-4, 0); c.lineTo(-8, 12); c.closePath(); c.fill();
+    c.fillStyle = "#a855f7"; c.fillRect(-2, -3, 6, 6);
+  } else if (id >= 43) {
+    c.fillStyle = "#18181b"; c.fillRect(-18, -5, 26, 10);
+    c.fillStyle = "#ef4444"; c.beginPath(); c.moveTo(20, 0); c.lineTo(8, -5); c.lineTo(8, 5); c.closePath(); c.fill();
+    c.fillStyle = "#38bdf8"; c.fillRect(-16, -8, 5, 16);
+  } else if (id >= 35) {
+    c.fillStyle = "#475569"; c.fillRect(-15, -4, 22, 8);
+    c.fillStyle = "#f43f5e"; c.beginPath(); c.moveTo(16, 0); c.lineTo(7, -4); c.lineTo(7, 4); c.closePath(); c.fill();
+    c.fillStyle = "#e2e8f0"; c.fillRect(-6, -10, 4, 20);
+  } else {
+    c.fillStyle = "#38bdf8";
+    c.beginPath(); c.moveTo(12, 0); c.lineTo(-8, -3); c.lineTo(-10, 0); c.lineTo(-8, 3); c.closePath(); c.fill();
+    c.fillStyle = "#facc15"; c.beginPath(); c.moveTo(2, 0); c.lineTo(-4, -10); c.lineTo(-6, -10); c.lineTo(-1, 0); c.lineTo(-6, 10); c.lineTo(-4, 10); c.fill();
+  }
+  c.restore();
+}
+
+function updatePreview() {
+  previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+  previewCtx.save();
+  previewCtx.translate(previewCanvas.width / 2, previewCanvas.height / 2);
+  previewCtx.scale(1.5, 1.5);
+  drawUniqueDroneModel(previewCtx, selectedDroneId, performance.now() * 0.05);
+  previewCtx.restore();
+}
+
+// --- СТАН ГРИ ---
+let money = 5000;
+let selectedDroneId = 0;
+let drones = [];
+let controlledIndex = -1;
+let enemyDrones = [];
+let enemyMissiles = [];
+let bullets = [];
+let flares = [];
+let explosions = [];
+let particles = [];
+let targets = [];
+let airDefenses = [];
+let mapBuildings = []; // Деталізовані будівлі на мапі РФ
+let keys = {};
+let frameTick = 0;
+let mouse = { x: 0, y: 0, down: false };
+let toastTimeout = null;
+
+function showToast(text) {
+  const el = document.getElementById('toast-msg');
+  el.innerText = text;
+  el.style.display = 'block';
+  clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => { el.style.display = 'none'; }, 1800);
+}
+
+window.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'Tab') { e.preventDefault(); switchControlledDrone(); }
+  if (e.code === 'KeyE' || e.code === 'ShiftLeft') { deployFlares(); }
+});
+window.addEventListener('keyup', e => keys[e.code] = false);
+
+canvas.addEventListener('mousemove', e => {
+  const rect = canvas.getBoundingClientRect();
+  mouse.x = e.clientX - rect.left;
+  mouse.y = e.clientY - rect.top;
+});
+
+canvas.addEventListener('mousedown', e => {
+  if (e.button === 0) {
+    mouse.down = true;
+    const rect = canvas.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+
+    let clickedDroneIdx = -1;
+    drones.forEach((d, idx) => {
+      if (Math.hypot(d.x - clickX, d.y - clickY) < 32) clickedDroneIdx = idx;
+    });
+
+    if (clickedDroneIdx !== -1) {
+      controlledIndex = clickedDroneIdx;
+    } else if (clickX < width * 0.35 || drones.length === 0) {
+      launchDrone(clickY);
+    }
+  }
+});
+window.addEventListener('mouseup', () => mouse.down = false);
+
+// --- ІНФРАСТРУКТУРНА КАРТА ТА БУДІВЛІ ---
+function initMap() {
+  targets = [];
+  airDefenses = [];
+  enemyDrones = [];
+  mapBuildings = [];
+  const groundY = height - 45;
+  const borderX = width * 0.24;
+
+  // Генерація фонових міських та промислових будівель на території РФ
+  for (let i = 0; i < 24; i++) {
+    const bx = borderX + 40 + i * ((width - borderX - 80) / 24);
+    const bw = 35 + Math.random() * 45;
+    const bh = 50 + Math.random() * 90;
+    mapBuildings.push({
+      x: bx,
+      y: groundY - bh,
+      w: bw,
+      h: bh,
+      type: i % 3 === 0 ? 'factory' : (i % 2 === 0 ? 'block' : 'hq'),
+      color: i % 3 === 0 ? '#1e293b' : '#0f172a'
+    });
+  }
+
+  const targetTypes = [
+    { name: "Склад БК", hp: 120, reward: 400, w: 34, h: 22, color: "#64748b" },
+    { name: "РЛС Вороніж", hp: 200, reward: 650, w: 28, h: 36, color: "#38bdf8" },
+    { name: "НПЗ (Нафтобаза)", hp: 380, reward: 950, w: 46, h: 32, color: "#f97316" },
+    { name: "Військовий аеродром", hp: 700, reward: 1700, w: 68, h: 20, color: "#94a3b8" },
+    { name: "Завод БПЛА / Ракет", hp: 1200, reward: 2800, w: 54, h: 42, color: "#ef4444" },
+    { name: "Головний Бункер", hp: 2800, reward: 8000, w: 64, h: 40, color: "#dc2626" }
+  ];
+
+  for (let i = 0; i < 16; i++) {
+    const progress = i / 15;
+    const x = borderX + 70 + progress * (width - borderX - 130);
+    const t = targetTypes[Math.min(targetTypes.length - 1, Math.floor(progress * targetTypes.length))];
+    targets.push({ x, y: groundY - t.h, w: t.w, h: t.h, name: t.name, hp: t.hp, maxHp: t.hp, reward: t.reward, color: t.color, destroyed: false });
+  }
+
+  const aaTypes = [
+    { name: "Шилка", range: 185, cooldown: 16, type: "flak", hp: 140, reward: 350, color: "#475569" },
+    { name: "Панцир", range: 270, cooldown: 75, type: "missile", speed: 6.5, dmg: 40, hp: 250, reward: 700, color: "#334155" },
+    { name: "Бук", range: 360, cooldown: 105, type: "missile", speed: 8.2, dmg: 85, hp: 400, reward: 1100, color: "#1e293b" },
+    { name: "С-400", range: 490, cooldown: 135, type: "missile", speed: 10.5, dmg: 180, hp: 700, reward: 2000, color: "#0f172a" }
+  ];
+
+  for (let i = 0; i < 8; i++) {
+    const progress = (i + 0.25) / 8;
+    const x = borderX + 100 + progress * (width - borderX - 160);
+    const aaType = aaTypes[Math.min(aaTypes.length - 1, Math.floor(progress * aaTypes.length))];
+    airDefenses.push({ x, y: groundY - 18, w: 30, h: 18, ...aaType, maxHp: aaType.hp, timer: Math.random() * 40, destroyed: false });
+  }
+}
+
+function respawnTargets() {
+  initMap();
+  updateUI();
+  showToast("Мапу та цілі РФ перезавантажено!");
+}
+
+// --- АНГАР ---
+let currentFilter = 'all';
+function renderHangar(filter = currentFilter) {
+  currentFilter = filter;
+  const grid = document.getElementById('drones-grid');
+  grid.innerHTML = '';
+
+  DRONES_DB.filter(d => filter === 'all' || d.cat === filter).forEach(d => {
+    const card = document.createElement('div');
+    card.className = `drone-item ${d.id === selectedDroneId ? 'active' : ''}`;
+    
+    let btnHtml = '';
+    if (d.bought) {
+      btnHtml = `<button class="buy-btn bought">✔ Куплено (0 ₴ запуск)</button>`;
+    } else {
+      btnHtml = `<button class="buy-btn locked" ${money >= d.buyCost ? '' : 'disabled'} onclick="buyDrone(${d.id})">Купити: ${d.buyCost} ₴</button>`;
+    }
+
+    card.innerHTML = `
+      <div>
+        <div class="drone-item-top">
+          <span class="type-badge" style="background:${d.isMissile ? '#881337' : '#1e3a8a'}">${d.type}</span>
+          <canvas class="mini-preview" id="mini-prev-${d.id}" width="68" height="42"></canvas>
+        </div>
+        <h4 style="color:${d.color}">${d.name}</h4>
+        <p>⚡ Швидкість: ${d.speed} | ❤️ Броня: ${d.hp}<br>💥 Урон: ${d.damage} | 🔥 ЛТЦ: ${d.flares}<br>📦 Ціна: ${d.buyCost} ₴</p>
+      </div>
+      <div>
+        <button class="btn" style="width:100%; margin-bottom:6px; background:${d.id === selectedDroneId ? '#15803d' : '#2563eb'}" onclick="selectDrone(${d.id})">${d.id === selectedDroneId ? '✔ Обрано' : 'Обрати'}</button>
+        ${btnHtml}
+      </div>
+    `;
+    grid.appendChild(card);
+
+    const miniC = document.getElementById(`mini-prev-${d.id}`).getContext('2d');
+    miniC.save(); miniC.translate(34, 21); miniC.scale(1.3, 1.3);
+    drawUniqueDroneModel(miniC, d.id, 10);
+    miniC.restore();
+  });
+}
+
+function toggleHangar() {
+  const modal = document.getElementById('hangar-modal');
+  modal.style.display = modal.style.display === 'block' ? 'none' : 'block';
+  if (modal.style.display === 'block') renderHangar();
+}
+
+function unlockAllForTest() {
+  DRONES_DB.forEach(d => d.bought = true);
+  money += 150000;
+  updateUI();
+  renderHangar();
+  showToast("Всі 50 дронів куплено і відкрито!");
+}
+
+function buyDrone(id) {
+  const d = DRONES_DB[id];
+  if (!d.bought && money >= d.buyCost) {
+    money -= d.buyCost;
+    d.bought = true;
+    selectDrone(id);
+    renderHangar();
+    updateUI();
+    showToast(`Придбано: ${d.name}!`);
+  }
+}
+
+function selectDrone(id) {
+  selectedDroneId = id;
+  const d = DRONES_DB[id];
+  document.getElementById('cur-drone-name').innerText = d.name;
+  document.getElementById('cur-drone-name').style.color = d.color;
+  document.getElementById('cur-drone-stats').innerText = 
+    `Швидкість: ${d.speed} | Урон: ${d.damage} | ЛТЦ: ${d.flares} | Запуск: ${d.bought ? 'Безкоштовно (0 ₴)' : 'Не куплено'}`;
+  updatePreview();
+  renderHangar();
+}
+
+// --- ЗАПУСК ТА КЕРУВАННЯ ---
+function launchDrone(targetY = null) {
+  const spec = DRONES_DB[selectedDroneId];
+  if (!spec) return;
+
+  if (!spec.bought) {
+    showToast(`Цей борт не куплено! Зайдіть в Ангар.`);
+    return;
+  }
+
+  const startY = targetY !== null ? Math.max(55, Math.min(height - 95, targetY)) : (height * 0.35 + Math.random() * height * 0.3);
+
+  drones.push({
+    specId: spec.id,
+    x: 45,
+    y: startY,
+    angle: spec.isBallistic ? -0.38 : 0,
+    baseSpeed: spec.speed,
+    currentSpeed: spec.speed,
+    turnRate: spec.turnRate,
+    hp: spec.hp,
+    maxHp: spec.hp,
+    damage: spec.damage,
+    radius: spec.radius,
+    stealth: spec.stealth,
+    flares: spec.flares,
+    isMissile: spec.isMissile,
+    isBallistic: spec.isBallistic,
+    color: spec.color,
+    name: spec.name,
+    diving: false
+  });
+
+  controlledIndex = drones.length - 1;
+}
+
+function launchSwarm() {
+  const spec = DRONES_DB[selectedDroneId];
+  if (!spec || !spec.bought) {
+    showToast(`Купіть цей борт в Ангарі!`);
+    return;
+  }
+  for (let i = 0; i < 3; i++) {
+    setTimeout(() => launchDrone(height * 0.25 + i * 75), i * 160);
+  }
+}
+
+function switchControlledDrone() {
+  if (drones.length === 0) { controlledIndex = -1; return; }
+  controlledIndex = (controlledIndex + 1) % drones.length;
+}
+
+function deployFlares() {
+  if (controlledIndex < 0 || controlledIndex >= drones.length) return;
+  const d = drones[controlledIndex];
+  if (d.flares <= 0) return;
+
+  d.flares--;
+  for (let i = 0; i < 6; i++) {
+    flares.push({ x: d.x, y: d.y, vx: -2 + (Math.random() - 0.5) * 3, vy: 1.5 + Math.random() * 2.5, life: 90 });
+  }
+}
+
+// --- ФІЗИКА ТА ВИБУХИ ---
+function createExplosion(x, y, radius, damage) {
+  explosions.push({ x, y, r: 5, maxR: radius, alpha: 1 });
+  for (let i = 0; i < 22; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const spd = Math.random() * 4.5 + 1;
+    particles.push({
+      x, y, vx: Math.cos(angle) * spd, vy: Math.sin(angle) * spd,
+      life: 25 + Math.random() * 15,
+      color: Math.random() > 0.35 ? "#f97316" : "#facc15"
+    });
+  }
+
+  targets.forEach(t => {
+    if (!t.destroyed && Math.hypot((t.x + t.w/2) - x, (t.y + t.h/2) - y) <= radius + t.w/2) {
+      t.hp -= damage;
+      if (t.hp <= 0) {
+        t.hp = 0; t.destroyed = true; money += t.reward;
+        createExplosion(t.x + t.w/2, t.y + t.h/2, 55, 0);
+      }
+    }
+  });
+
+  airDefenses.forEach(aa => {
+    if (!aa.destroyed && Math.hypot((aa.x + aa.w/2) - x, (aa.y + aa.h/2) - y) <= radius + 22) {
+      aa.hp -= damage;
+      if (aa.hp <= 0) {
+        aa.destroyed = true; money += aa.reward;
+        createExplosion(aa.x + aa.w/2, aa.y + aa.h/2, 48, 0);
+      }
+    }
+  });
+
+  for (let i = enemyDrones.length - 1; i >= 0; i--) {
+    let ed = enemyDrones[i];
+    if (Math.hypot(ed.x - x, ed.y - y) <= radius + 15) {
+      ed.hp -= damage;
+      if (ed.hp <= 0) {
+        money += ed.reward;
+        createExplosion(ed.x, ed.y, 35, 0);
+        enemyDrones.splice(i, 1);
+      }
+    }
+  }
+
+  updateUI();
+  checkVictory();
+}
+
+function normalizeAngle(a) {
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a < -Math.PI) a += Math.PI * 2;
+  return a;
+}
+
+function emitFireAndSmoke(obj) {
+  const cx = obj.x + obj.w * (0.2 + Math.random() * 0.6);
+  const cy = obj.y + obj.h * 0.4;
+
+  if (Math.random() < 0.75) {
+    particles.push({
+      x: cx, y: cy,
+      vx: (Math.random() - 0.5) * 0.9, vy: -(1.2 + Math.random() * 1.8),
+      life: 16 + Math.random() * 12, size: 3 + Math.random() * 3.5,
+      color: Math.random() > 0.45 ? "#f97316" : "#facc15"
+    });
+  }
+
+  if (Math.random() < 0.45) {
+    particles.push({
+      x: cx, y: cy - 8,
+      vx: 0.4 + Math.random() * 0.7, vy: -(1.5 + Math.random() * 1.5),
+      life: 40 + Math.random() * 25, size: 5 + Math.random() * 5,
+      color: "rgba(30, 41, 59, 0.65)"
+    });
+  }
+}
+
+function update() {
+  frameTick++;
+  const groundY = height - 45;
+  if (controlledIndex >= drones.length) controlledIndex = drones.length - 1;
+
+  targets.forEach(t => { if (t.destroyed) emitFireAndSmoke(t); });
+  airDefenses.forEach(aa => { if (aa.destroyed) emitFireAndSmoke(aa); });
+
+  // Спавн ворожих дронів
+  if (frameTick % 220 === 0 && targets.some(t => !t.destroyed)) {
+    let aliveAa = airDefenses.filter(aa => !aa.destroyed);
+    if (aliveAa.length > 0) {
+      let spawner = aliveAa[Math.floor(Math.random() * aliveAa.length)];
+      let types = [
+        { name: "Орлан-10", speed: 3.2, hp: 30, reward: 150, color: "#a855f7" },
+        { name: "Ланцет", speed: 4.8, hp: 45, reward: 250, color: "#ef4444" },
+        { name: "Шахед-136", speed: 3.8, hp: 70, reward: 350, color: "#f97316" }
+      ];
+      let t = types[Math.floor(Math.random() * types.length)];
+      enemyDrones.push({
+        x: spawner.x,
+        y: spawner.y,
+        vx: -(t.speed + Math.random() * 1.2),
+        vy: (Math.random() - 0.5) * 1.5,
+        hp: t.hp,
+        maxHp: t.hp,
+        reward: t.reward,
+        name: t.name,
+        color: t.color
+      });
+    }
+  }
+
+  for (let i = enemyDrones.length - 1; i >= 0; i--) {
+    let ed = enemyDrones[i];
+    ed.x += ed.vx;
+    ed.y += ed.vy;
+
+    for (let d of drones) {
+      if (Math.hypot(d.x - ed.x, d.y - ed.y) < 22) {
+        d.hp -= 45;
+        ed.hp = 0;
+        createExplosion(ed.x, ed.y, 25, 30);
+        break;
+      }
+    }
+
+    if (ed.x < 30 || ed.hp <= 0) {
+      if (ed.hp <= 0) {
+        money += ed.reward;
+        createExplosion(ed.x, ed.y, 20, 0);
+      } else {
+        money = Math.max(0, money - 250);
+        showToast("Ворожий дрон долетів до нашої території! Штраф -250 ₴");
+      }
+      enemyDrones.splice(i, 1);
+      updateUI();
+    }
+  }
+
+  for (let i = drones.length - 1; i >= 0; i--) {
+    const d = drones[i];
+    const isControlled = (i === controlledIndex);
+
+    if (isControlled) {
+      if (keys['KeyW'] || keys['ArrowUp']) d.angle -= d.turnRate * 0.75;
+      if (keys['KeyS'] || keys['ArrowDown']) d.angle += d.turnRate * 0.75;
+      if (keys['Space']) d.diving = true;
+
+      if (keys['KeyD'] || keys['ArrowRight']) {
+        d.currentSpeed = d.baseSpeed * 1.45;
+      } else if (keys['KeyA'] || keys['ArrowLeft']) {
+        d.currentSpeed = d.baseSpeed * 0.65;
+      } else {
+        d.currentSpeed = d.baseSpeed;
+      }
+
+      if (mouse.down && !d.diving) {
+        const targetAngle = Math.atan2(mouse.y - d.y, mouse.x - d.x);
+        const diff = normalizeAngle(targetAngle - d.angle);
+        d.angle += Math.sign(diff) * Math.min(Math.abs(diff), d.turnRate);
+      }
+
+      if (d.diving) {
+        const diff = normalizeAngle(Math.PI / 2 - d.angle);
+        d.angle += Math.sign(diff) * 0.16;
+        d.currentSpeed = d.baseSpeed * 1.5;
+      }
+    } else {
+      if (d.isBallistic) {
+        if (d.x > width * 0.45) d.angle += 0.022;
+        else d.angle += 0.008;
+      } else {
+        let nearest = null, minDist = 280;
+        [...targets, ...airDefenses, ...enemyDrones].forEach(obj => {
+          if (!obj.destroyed && obj.x > d.x - 10) {
+            const dist = Math.hypot(obj.x - d.x, obj.y - d.y);
+            if (dist < minDist) { minDist = dist; nearest = obj; }
+          }
+        });
+        if (nearest) {
+          const targetAngle = Math.atan2((nearest.y + (nearest.h || 0)/2) - d.y, (nearest.x + (nearest.w || 0)/2) - d.x);
+          const diff = normalizeAngle(targetAngle - d.angle);
+          d.angle += Math.sign(diff) * Math.min(Math.abs(diff), d.turnRate * 0.85);
+        }
+      }
+    }
+
+    d.x += Math.cos(d.angle) * d.currentSpeed;
+    d.y += Math.sin(d.angle) * d.currentSpeed;
+
+    if (d.y < 15) {
+      d.y = 15;
+      if (d.angle < 0) d.angle = 0.08;
+    }
+
+    if (d.isMissile || d.currentSpeed > d.baseSpeed * 1.1) {
+      particles.push({
+        x: d.x - Math.cos(d.angle) * 14, y: d.y - Math.sin(d.angle) * 14,
+        vx: (Math.random() - 0.5) * 0.8, vy: (Math.random() - 0.5) * 0.8,
+        life: 16, size: 3.5, color: d.isMissile ? "#fb923c" : "#38bdf8"
+      });
+    }
+
+    let hit = d.y >= groundY;
+    [...targets, ...airDefenses].forEach(obj => {
+      if (!obj.destroyed && d.x >= obj.x - 4 && d.x <= obj.x + obj.w + 4 && d.y >= obj.y - 4 && d.y <= obj.y + obj.h + 4) {
+        hit = true;
+      }
+    });
+
+    if (hit) {
+      createExplosion(d.x, d.y, d.radius, d.damage);
+      drones.splice(i, 1);
+      if (controlledIndex >= i) controlledIndex = Math.max(0, drones.length - 1);
+      continue;
+    }
+
+    if (d.x > width + 50 || d.x < -50 || d.hp <= 0) {
+      if (d.hp <= 0) createExplosion(d.x, d.y, 18, 0);
+      drones.splice(i, 1);
+      if (controlledIndex >= i) controlledIndex = Math.max(0, drones.length - 1);
+    }
+  }
+
+  airDefenses.forEach(aa => {
+    if (aa.destroyed) return;
+    if (aa.timer > 0) { aa.timer--; return; }
+    for (let d of drones) {
+      if (d.isBallistic && d.y < height * 0.22) continue;
+      if (Math.hypot(d.x - aa.x, d.y - aa.y) <= aa.range * d.stealth) {
+        aa.timer = aa.cooldown;
+        if (aa.type === "flak") {
+          const ang = Math.atan2(d.y - aa.y, d.x - aa.x) + (Math.random() - 0.5) * 0.16;
+          bullets.push({ x: aa.x + aa.w/2, y: aa.y, vx: Math.cos(ang)*9.5, vy: Math.sin(ang)*9.5, dmg: 14, life: 36 });
+        } else {
+          enemyMissiles.push({ x: aa.x + aa.w/2, y: aa.y, target: d, speed: aa.speed, dmg: aa.dmg, life: 165 });
+        }
+        break;
+      }
+    }
+  });
+
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i];
+    b.x += b.vx; b.y += b.vy; b.life--;
+    for (let d of drones) {
+      if (Math.hypot(d.x - b.x, d.y - b.y) < 13) { d.hp -= b.dmg; b.life = 0; break; }
+    }
+    if (b.life <= 0) bullets.splice(i, 1);
+  }
+
+  for (let i = enemyMissiles.length - 1; i >= 0; i--) {
+    let m = enemyMissiles[i];
+    m.life--;
+    let decoy = flares.find(f => Math.hypot(f.x - m.x, f.y - m.y) < 110);
+    let aim = decoy || (m.target && drones.includes(m.target) ? m.target : null);
+    if (aim) {
+      let ang = Math.atan2(aim.y - m.y, aim.x - m.x);
+      m.x += Math.cos(ang) * m.speed; m.y += Math.sin(ang) * m.speed;
+      if (Math.hypot(aim.x - m.x, aim.y - m.y) < 15) {
+        if (!decoy) aim.hp -= m.dmg;
+        createExplosion(m.x, m.y, 15, 0);
+        enemyMissiles.splice(i, 1);
+        continue;
+      }
+    } else {
+      m.y -= m.speed;
+    }
+    if (m.life <= 0 || m.y < -50) enemyMissiles.splice(i, 1);
+  }
+
+  for (let i = flares.length - 1; i >= 0; i--) {
+    flares[i].x += flares[i].vx; flares[i].y += flares[i].vy; flares[i].life--;
+    particles.push({ x: flares[i].x, y: flares[i].y, vx: 0, vy: 0, life: 8, size: 3, color: "#fef08a" });
+    if (flares[i].life <= 0) flares.splice(i, 1);
+  }
+
+  for (let i = particles.length - 1; i >= 0; i--) {
+    particles[i].x += particles[i].vx; particles[i].y += particles[i].vy; particles[i].life--;
+    if (particles[i].life <= 0) particles.splice(i, 1);
+  }
+
+  for (let i = explosions.length - 1; i >= 0; i--) {
+    explosions[i].r += (explosions[i].maxR - explosions[i].r) * 0.25;
+    explosions[i].alpha -= 0.045;
+    if (explosions[i].alpha <= 0) explosions.splice(i, 1);
+  }
+
+  document.getElementById('active-drones-display').innerText = drones.length;
+  let tel = document.getElementById('telemetry-info');
+  if (drones.length > 0 && controlledIndex >= 0 && drones[controlledIndex]) {
+    let c = drones[controlledIndex];
+    tel.innerHTML = `<span style="color:${c.color}; font-weight:bold;">${c.name}</span><br>❤️ Броня: ${Math.max(0, Math.round(c.hp))}/${c.maxHp} | 🔥 Пастки (E): ${c.flares}`;
+  } else {
+    tel.innerHTML = `Немає активного борту (Клікни по небу)`;
+  }
+  updatePreview();
+}
+
+function draw() {
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, height);
+  skyGrad.addColorStop(0, "#020617");
+  skyGrad.addColorStop(1, "#1e293b");
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, width, height);
+
+  const groundY = height - 45;
+  const borderX = width * 0.24;
+
+  // Малювання інфраструктурних будівель на фоні РФ
+  mapBuildings.forEach(b => {
+    ctx.fillStyle = b.color;
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+
+    // Віконця на будівлях
+    ctx.fillStyle = "rgba(56, 189, 248, 0.2)";
+    for (let wx = b.x + 6; wx < b.x + b.w - 6; wx += 10) {
+      for (let wy = b.y + 8; wy < b.y + b.h - 8; wy += 14) {
+        ctx.fillRect(wx, wy, 5, 8);
+      }
+    }
+  });
+
+  // Лінія фронту
+  ctx.strokeStyle = "rgba(239, 68, 68, 0.55)";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([8, 8]);
+  ctx.beginPath(); ctx.moveTo(borderX, 0); ctx.lineTo(borderX, groundY); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.lineWidth = 1;
+
+  ctx.font = "bold 14px sans-serif";
+  ctx.fillStyle = "#38bdf8"; ctx.fillText("🇺🇦 УКРАЇНА (База запуску)", 20, 28);
+  ctx.fillStyle = "#f87171"; ctx.fillText("⛔ ТЕРИТОРІЯ РФ (Інфраструктура та ППО)", borderX + 20, 28);
+
+  // Земля
+  ctx.fillStyle = "#14532d"; ctx.fillRect(0, groundY, borderX, 45);
+  ctx.fillStyle = "#27272a"; ctx.fillRect(borderX, groundY, width - borderX, 45);
+
+  // Дороги на ворожій території
+  ctx.strokeStyle = "#3f3f46"; ctx.lineWidth = 6;
+  ctx.beginPath(); ctx.moveTo(borderX, groundY - 4); ctx.lineTo(width, groundY - 4); ctx.stroke();
+  ctx.lineWidth = 1;
+
+  // Стартова база
+  ctx.fillStyle = "#2563eb"; ctx.fillRect(15, groundY - 26, 48, 26);
+
+  // Стратегічні цілі РФ
+  targets.forEach(t => {
+    if (!t.destroyed) {
+      ctx.fillStyle = t.color;
+      ctx.fillRect(t.x, t.y, t.w, t.h);
+
+      const hpPct = t.hp / t.maxHp;
+      ctx.fillStyle = "#000"; ctx.fillRect(t.x, t.y - 10, t.w, 5);
+      ctx.fillStyle = "#22c55e"; ctx.fillRect(t.x, t.y - 10, t.w * hpPct, 5);
+      ctx.fillStyle = "#e2e8f0"; ctx.font = "10px sans-serif";
+      ctx.fillText(t.name, t.x - 5, t.y - 14);
+    } else {
+      ctx.fillStyle = "#0f172a";
+      ctx.fillRect(t.x, t.y + t.h * 0.35, t.w, t.h * 0.65);
+
+      const flicker = Math.sin(frameTick * 0.4 + t.x) * 3;
+      ctx.fillStyle = "rgba(239, 68, 68, 0.55)";
+      ctx.beginPath();
+      ctx.ellipse(t.x + t.w / 2, t.y + t.h - 2, t.w * 0.45 + flicker, 7, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  });
+
+  // ППО РФ
+  airDefenses.forEach(aa => {
+    if (!aa.destroyed) {
+      ctx.strokeStyle = "rgba(239, 68, 68, 0.11)";
+      ctx.beginPath(); ctx.arc(aa.x + aa.w/2, aa.y, aa.range, Math.PI, 0); ctx.stroke();
+      ctx.fillStyle = aa.color; ctx.fillRect(aa.x, aa.y, aa.w, aa.h);
+      ctx.strokeStyle = "#f87171"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(aa.x + aa.w/2, aa.y); ctx.lineTo(aa.x + aa.w/2 - 8, aa.y - 10); ctx.stroke();
+      ctx.lineWidth = 1;
+      ctx.fillStyle = "#fca5a5"; ctx.font = "bold 9px sans-serif";
+      ctx.fillText("ППО", aa.x + 4, aa.y + 12);
+    } else {
+      ctx.fillStyle = "#090d16";
+      ctx.fillRect(aa.x, aa.y + 6, aa.w, aa.h - 6);
+      ctx.fillStyle = "rgba(249, 115, 22, 0.65)";
+      ctx.beginPath();
+      ctx.arc(aa.x + aa.w / 2, aa.y + 12, 8 + Math.sin(frameTick * 0.5) * 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  });
+
+  // Ворожі дрони у повітрі
+  enemyDrones.forEach(ed => {
+    ctx.fillStyle = ed.color;
+    ctx.beginPath();
+    ctx.arc(ed.x, ed.y, 8, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#f87171"; ctx.font = "9px sans-serif";
+    ctx.fillText(ed.name, ed.x - 18, ed.y - 12);
+  });
+
+  drones.forEach((d, idx) => {
+    const isControlled = (idx === controlledIndex);
+
+    if (isControlled && mouse.down) {
+      ctx.strokeStyle = "rgba(56, 189, 248, 0.35)";
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.moveTo(d.x, d.y); ctx.lineTo(mouse.x, mouse.y); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    ctx.save();
+    ctx.translate(d.x, d.y);
+    ctx.rotate(d.angle);
+    drawUniqueDroneModel(ctx, d.specId, frameTick);
+
+    if (isControlled) {
+      ctx.strokeStyle = "#38bdf8"; ctx.lineWidth = 1.5;
+      ctx.strokeRect(-20, -14, 42, 28);
+    }
+    ctx.restore();
+
+    if (d.hp < d.maxHp) {
+      ctx.fillStyle = "#ef4444";
+      ctx.fillRect(d.x - 10, d.y - 16, 20 * (d.hp / d.maxHp), 3);
+    }
+  });
+
+  flares.forEach(f => {
+    ctx.fillStyle = "#fef08a";
+    ctx.beginPath(); ctx.arc(f.x, f.y, 3.5, 0, Math.PI * 2); ctx.fill();
+  });
+
+  ctx.fillStyle = "#fde047";
+  bullets.forEach(b => {
+    ctx.beginPath(); ctx.arc(b.x, b.y, 2.5, 0, Math.PI * 2); ctx.fill();
+  });
+
+  enemyMissiles.forEach(m => {
+    ctx.fillStyle = "#ef4444";
+    ctx.beginPath(); ctx.arc(m.x, m.y, 4, 0, Math.PI * 2); ctx.fill();
+  });
+
+  particles.forEach(p => {
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size || 3, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  explosions.forEach(ex => {
+    ctx.fillStyle = `rgba(249, 115, 22, ${ex.alpha})`;
+    ctx.beginPath(); ctx.arc(ex.x, ex.y, ex.r, 0, Math.PI * 2); ctx.fill();
+  });
+}
+
+function updateUI() {
+  document.getElementById('money-display').innerText = money;
+  document.getElementById('targets-display').innerText = targets.filter(t => !t.destroyed).length;
+}
+
+function checkVictory() {
+  if (targets.filter(t => !t.destroyed).length === 0) {
+    document.getElementById('victory-earned-text').innerText = `Перемога! Ваш бюджет (${money} ₴) та всі куплені дрони збережено.`;
+    document.getElementById('victory-screen').style.display = 'flex';
+  }
+}
+
+function nextLevelAndKeep() {
+  drones = [];
+  controlledIndex = -1;
+  enemyDrones = [];
+  enemyMissiles = [];
+  bullets = [];
+  flares = [];
+  particles = [];
+  explosions = [];
+  
+  initMap();
+  updateUI();
+  document.getElementById('victory-screen').style.display = 'none';
+  showToast("Нова хвиля! Бюджет та куплені борги збережено.");
+}
+
+function resetGame() {
+  money = 5000; drones = []; controlledIndex = -1;
+  enemyDrones = []; enemyMissiles = []; bullets = []; flares = []; particles = []; explosions = [];
+  DRONES_DB.forEach((d, i) => { d.bought = (i === 0); });
+  selectDrone(0); initMap(); updateUI();
+  document.getElementById('victory-screen').style.display = 'none';
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+initMap();
+updatePreview();
+updateUI();
+loop();
+</script>
+</body>
+</html>
